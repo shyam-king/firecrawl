@@ -104,6 +104,8 @@ const connectionMonitorInterval =
   Number(process.env.CONNECTION_MONITOR_INTERVAL) || 10;
 const gotJobInterval = Number(process.env.CONNECTION_MONITOR_INTERVAL) || 20;
 
+const maxConcurrentJobs = Number(process.env.MAX_CONCURRENT_JOBS) || 0; // 0 means no limit
+
 const runningJobs: Set<string> = new Set();
 
 // Install cacheable lookup for all other requests
@@ -724,6 +726,8 @@ const workerFun = async (
     lockDuration: 30 * 1000, // 30 seconds
     stalledInterval: 30 * 1000, // 30 seconds
     maxStalledCount: 10, // 10 times
+    concurrency: 1,
+    
   });
 
   worker.startStalledCheckTimer();
@@ -760,6 +764,13 @@ const workerFun = async (
       continue;
     } else {
       cantAcceptConnectionCount = 0;
+    }
+
+    // Check MAX_CONCURRENT_JOBS limit
+    if (maxConcurrentJobs > 0 && runningJobs.size >= maxConcurrentJobs) {
+      logger.info(`Not accepting jobs due to MAX_CONCURRENT_JOBS limit: ${runningJobs.size}/${maxConcurrentJobs}`);
+      await sleep(cantAcceptConnectionInterval);
+      continue;
     }
 
     const job = await worker.getNextJob(token);

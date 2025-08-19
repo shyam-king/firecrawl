@@ -89,7 +89,7 @@ export async function scrapeDocument(
       logger.debug("Scrape finished!");
       return x;
     } catch (timeoutError) {
-      logger.warn("Scrape failed.", { error: timeoutError });
+      logger.error("Scrape failed.", { err: timeoutError });
 
       if (options.isSingleUrl) {
         // For single URLs, try again with double timeout
@@ -102,7 +102,7 @@ export async function scrapeDocument(
       throw timeoutError;
     }
   } catch (error) {
-    logger.error(`error in scrapeDocument`, { error });
+    logger.error(`error in scrapeDocument`, { err: error });
     if (trace) {
       trace.status = "error";
       trace.error = error.message;
