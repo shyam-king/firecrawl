@@ -1,14 +1,60 @@
-import express, { Request, Response } from 'express';
+import express, { Request, Response, NextFunction } from 'express';
 import bodyParser from 'body-parser';
 import { chromium, Browser, BrowserContext, Route, Request as PlaywrightRequest, Page } from 'playwright';
 import dotenv from 'dotenv';
 import UserAgent from 'user-agents';
+import winston from 'winston';
+import { v4 as uuidv4 } from 'uuid';
 import { getError } from './helpers/get_error';
 
 dotenv.config();
 
+// Configure Winston logger with JSON formatter
+const logger = winston.createLogger({
+  level: process.env.LOG_LEVEL || 'info',
+  format: winston.format.combine(
+    winston.format.timestamp(),
+    winston.format.errors({ stack: true }),
+    winston.format.json()
+  ),
+  defaultMeta: { service: 'playwright-scraper' },
+  transports: [
+    // Console transport with JSON format
+    new winston.transports.Console({
+      format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json()
+      )
+    }),
+    // File transport with JSON format for all logs
+    new winston.transports.File({ 
+      filename: 'combined.log',
+      format: winston.format.combine(
+        winston.format.timestamp(),
+        winston.format.json()
+      )
+    })
+  ],
+});
+
+// Extend Express Request interface to include correlationId
+declare global {
+  namespace Express {
+    interface Request {
+      correlationId: string;
+    }
+  }
+}
+
 const app = express();
 const port = process.env.PORT || 3003;
+
+// Correlation ID middleware
+app.use((req: Request, res: Response, next: NextFunction) => {
+  req.correlationId = uuidv4();
+  res.setHeader('X-Correlation-ID', req.correlationId);
+  next();
+});
 
 app.use(bodyParser.json());
 
@@ -33,6 +79,11 @@ const AD_SERVING_DOMAINS = [
   'fbcdn.net',
   'amazon-adsystem.com'
 ];
+
+// Helper function to create contextual logger
+const createLogger = (correlationId?: string) => {
+  return logger.child({ correlationId });
+};
 
 interface UrlModel {
   url: string;
@@ -94,11 +145,13 @@ const initializeBrowser = async () => {
     const hostname = requestUrl.hostname;
 
     if (AD_SERVING_DOMAINS.some(domain => hostname.includes(domain))) {
-      console.log(hostname);
+      logger.info('Blocked ad serving domain', { hostname });
       return route.abort();
     }
     return route.continue();
   });
+
+  isInitialized = true;
 };
 
 const shutdownBrowser = async () => {
@@ -119,8 +172,9 @@ const isValidUrl = (urlString: string): boolean => {
   }
 };
 
-const scrapePage = async (page: Page, url: string, waitUntil: 'load' | 'networkidle', waitAfterLoad: number, timeout: number, checkSelector: string | undefined) => {
-  console.log(`Navigating to ${url} with waitUntil: ${waitUntil} and timeout: ${timeout}ms`);
+const scrapePage = async (page: Page, url: string, waitUntil: 'load' | 'networkidle', waitAfterLoad: number, timeout: number, checkSelector: string | undefined, correlationId?: string) => {
+  const contextLogger = createLogger(correlationId);
+  contextLogger.info('Navigating to page', { url, waitUntil, timeout });
   const response = await page.goto(url, { waitUntil, timeout });
 
   if (waitAfterLoad > 0) {
@@ -153,8 +207,14 @@ const scrapePage = async (page: Page, url: string, waitUntil: 'load' | 'networki
   };
 };
 
+let isInitialized = false;
+
 app.get('/health', async (req: Request, res: Response) => {
+  const contextLogger = createLogger(req.correlationId);
+  
   try {
+    contextLogger.info('Health check started');
+    
     if (!browser || !context) {
       await initializeBrowser();
     }
@@ -162,9 +222,10 @@ app.get('/health', async (req: Request, res: Response) => {
     const testPage = await context.newPage();
     await testPage.close();
     
+    contextLogger.info('Health check passed');
     res.status(200).json({ status: 'healthy' });
   } catch (error) {
-    console.error('Health check failed:', error);
+    contextLogger.info('Health check failed', { error: error instanceof Error ? error.message : 'Unknown error occurred' });
     res.status(503).json({ 
       status: 'unhealthy', 
       error: error instanceof Error ? error.message : 'Unknown error occurred' 
@@ -172,16 +233,23 @@ app.get('/health', async (req: Request, res: Response) => {
   }
 });
 
-app.post('/scrape', async (req: Request, res: Response) => {
-  const { url, wait_after_load = 0, timeout = 15000, headers, check_selector }: UrlModel = req.body;
 
-  console.log(`================= Scrape Request =================`);
-  console.log(`URL: ${url}`);
-  console.log(`Wait After Load: ${wait_after_load}`);
-  console.log(`Timeout: ${timeout}`);
-  console.log(`Headers: ${headers ? JSON.stringify(headers) : 'None'}`);
-  console.log(`Check Selector: ${check_selector ? check_selector : 'None'}`);
-  console.log(`==================================================`);
+
+app.post('/scrape', async (req: Request, res: Response) => {
+  if (!isInitialized) {
+    return res.status(503).json({ status: 'unhealthy' });
+  }
+
+  const { url, wait_after_load = 0, timeout = 15000, headers, check_selector }: UrlModel = req.body;
+  const contextLogger = createLogger(req.correlationId);
+
+  contextLogger.info('Scrape request received', {
+    url,
+    wait_after_load,
+    timeout,
+    headers: headers || null,
+    check_selector: check_selector || null
+  });
 
   if (!url) {
     return res.status(400).json({ error: 'URL is required' });
@@ -192,7 +260,7 @@ app.post('/scrape', async (req: Request, res: Response) => {
   }
 
   if (!PROXY_SERVER) {
-    console.warn('⚠️ WARNING: No proxy server provided. Your IP address may be blocked.');
+    contextLogger.info('No proxy server provided. IP address may be blocked.');
   }
 
   if (!browser || !context) {
@@ -209,14 +277,15 @@ app.post('/scrape', async (req: Request, res: Response) => {
   let result: Awaited<ReturnType<typeof scrapePage>>;
   try {
     // Strategy 1: Normal
-    console.log('Attempting strategy 1: Normal load');
-    result = await scrapePage(page, url, 'load', wait_after_load, timeout, check_selector);
+    contextLogger.info('Attempting scrape strategy 1: Normal load');
+    result = await scrapePage(page, url, 'load', wait_after_load, timeout, check_selector, req.correlationId);
   } catch (error) {
-    console.log('Strategy 1 failed, attempting strategy 2: Wait until networkidle');
+    contextLogger.info('Strategy 1 failed, attempting strategy 2: Wait until networkidle', { error: error instanceof Error ? error.message : 'Unknown error' });
     try {
       // Strategy 2: Wait until networkidle
-      result = await scrapePage(page, url, 'networkidle', wait_after_load, timeout, check_selector);
+      result = await scrapePage(page, url, 'networkidle', wait_after_load, timeout, check_selector, req.correlationId);
     } catch (finalError) {
+      contextLogger.info('Both scrape strategies failed', { error: finalError instanceof Error ? finalError.message : 'Unknown error' });
       await page.close();
       return res.status(500).json({ error: 'An error occurred while fetching the page.' });
     }
@@ -225,9 +294,9 @@ app.post('/scrape', async (req: Request, res: Response) => {
   const pageError = result.status !== 200 ? getError(result.status) : undefined;
 
   if (!pageError) {
-    console.log(`✅ Scrape successful!`);
+    contextLogger.info('Scrape completed successfully', { status: result.status });
   } else {
-    console.log(`🚨 Scrape failed with status code: ${result.status} ${pageError}`);
+    contextLogger.info('Scrape completed with error', { status: result.status, pageError });
   }
 
   await page.close();
@@ -240,15 +309,22 @@ app.post('/scrape', async (req: Request, res: Response) => {
   });
 });
 
+
 app.listen(port, () => {
   initializeBrowser().then(() => {
-    console.log(`Server is running on port ${port}`);
+    logger.info('Server started successfully', { port });
+  }).catch((error) => {
+    logger.info('Failed to initialize browser', { error: error instanceof Error ? error.message : 'Unknown error' });
   });
 });
 
 process.on('SIGINT', () => {
+  logger.info('Received SIGINT, shutting down gracefully');
   shutdownBrowser().then(() => {
-    console.log('Browser closed');
+    logger.info('Browser closed successfully');
     process.exit(0);
+  }).catch((error) => {
+    logger.info('Error during shutdown', { error: error instanceof Error ? error.message : 'Unknown error' });
+    process.exit(1);
   });
 });

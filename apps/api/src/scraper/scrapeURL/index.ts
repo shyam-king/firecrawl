@@ -420,9 +420,9 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
         };
       } else {
         Sentry.captureException(error);
-        meta.logger.warn(
+        meta.logger.error(
           "An unexpected error happened while scraping with " + engine + ".",
-          { error },
+          { err: error },
         );
         meta.results[engine] = {
           state: "error",

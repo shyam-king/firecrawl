@@ -49,8 +49,8 @@ export const engines: Engine[] = [
         "fire-engine;tlsclient;stealth" as const,
       ]
     : []),
-  ...(usePlaywright ? ["playwright" as const] : []),
   "fetch",
+  ...(usePlaywright ? ["playwright" as const] : []),
   "pdf",
   "docx",
 ];
@@ -315,7 +315,7 @@ export const engineOptions: {
       stealthProxy: false,
       disableAdblock: false,
     },
-    quality: 20,
+    quality: 4,
   },
   "fire-engine;tlsclient": {
     features: {

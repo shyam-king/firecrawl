@@ -34,6 +34,8 @@ export async function scrapeDocument_F0(
 
   async function attemptScrape(timeout: number) {
     const jobId = crypto.randomUUID();
+    logger.info("Attempting scrape F0...", { scrapeId: jobId });
+    
     const jobPriority = await getJobPriority({
       team_id: options.teamId,
       basePriority: 10,
@@ -81,7 +83,6 @@ export async function scrapeDocument_F0(
 
   try {
     try {
-      logger.debug("Attempting scrape...");
       const x = await attemptScrape(options.timeout);
       logger.debug("Scrape finished!");
       return x;
