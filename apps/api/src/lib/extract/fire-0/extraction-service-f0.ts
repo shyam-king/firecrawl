@@ -331,7 +331,7 @@ import { langfuse } from "../../../services/langfuse";
         ],
       });
   
-      const timeout = 60000;
+      const timeout = request.scrapeOptions?.timeout ?? 60000;
   
       await updateExtract(extractId, {
         status: "processing",
@@ -614,7 +614,7 @@ import { langfuse } from "../../../services/langfuse";
       });
   
       // Scrape documents
-      const timeout = 60000;
+      const timeout = request.scrapeOptions?.timeout || 60000;
       let singleAnswerDocs: Document[] = [];
   
       // let rerank = await rerankLinks(links.map((url) => ({ url })), request.prompt ?? JSON.stringify(request.schema), urlTraces);

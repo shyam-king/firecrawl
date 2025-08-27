@@ -94,6 +94,15 @@ async function addScrapeJobRaw(
   let currentActiveConcurrency = 0;
   let maxConcurrency = 0;
 
+  // Skip concurrency limits entirely for bypass team
+  if (webScraperOptions.team_id === "bypass") {
+    _logger.debug("Bypassing concurrency limits for bypass team", { 
+      jobId,
+      url: webScraperOptions.url 
+    });
+    return await _addScrapeJobToBullMQ(webScraperOptions, options, jobId, jobPriority);
+  }
+
   if (directToBullMQ) {
     concurrencyLimited = "no";
   } else {
@@ -193,6 +202,26 @@ export async function addScrapeJobs(
   }
 
   for (const [teamId, teamJobs] of jobsByTeam) {
+    // Skip concurrency limits entirely for bypass team
+    if (teamId === "bypass") {
+      _logger.debug("Bypassing concurrency limits for bypass team batch jobs", { 
+        jobCount: teamJobs.length,
+        teamId 
+      });
+      
+      await Promise.all(
+        teamJobs.map(async (job) => {
+          await _addScrapeJobToBullMQ(
+            job.data,
+            job.opts,
+            job.opts.jobId,
+            job.opts.priority,
+          );
+        }),
+      );
+      continue; // Skip the rest of the concurrency logic for this team
+    }
+
     // == Buckets for jobs ==
     let jobsForcedToCQ: {
       data: WebScraperOptions;

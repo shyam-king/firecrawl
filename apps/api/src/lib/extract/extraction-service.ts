@@ -404,7 +404,7 @@ export async function performExtraction(
         ],
       });
 
-      const timeout = 60000;
+      const timeout = request.scrapeOptions?.timeout ?? 60000;
 
       await updateExtract(extractId, {
         status: "processing",
@@ -746,7 +746,7 @@ export async function performExtraction(
       });
 
       // Scrape documents
-      const timeout = 60000;
+      const timeout = request.scrapeOptions?.timeout ?? 60000;
       let singleAnswerDocs: Document[] = [];
 
       // let rerank = await rerankLinks(links.map((url) => ({ url })), request.prompt ?? JSON.stringify(request.schema), urlTraces);

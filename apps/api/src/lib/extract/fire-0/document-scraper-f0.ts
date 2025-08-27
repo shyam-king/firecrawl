@@ -33,6 +33,7 @@ export async function scrapeDocument_F0(
 
   async function attemptScrape(timeout: number) {
     const jobId = crypto.randomUUID();
+    logger.info("Attempting scrape F0...", { scrapeId: jobId, timeout });
     const jobPriority = await getJobPriority({
       team_id: options.teamId,
       basePriority: 10,
