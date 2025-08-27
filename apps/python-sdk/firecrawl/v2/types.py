@@ -174,6 +174,12 @@ class Source(BaseModel):
 
 SourceOption = Union[str, Source]
 
+class Category(BaseModel):
+    """Configuration for a search category."""
+    type: str
+
+CategoryOption = Union[str, Category]
+
 FormatString = Literal[
     # camelCase versions (API format)
     "markdown", "html", "rawHtml", "links", "screenshot", "summary", "changeTracking", "json",
@@ -327,11 +333,37 @@ class CrawlJob(BaseModel):
     next: Optional[str] = None
     data: List[Document] = []
 
-class SearchDocument(Document):
-    """A document from a search operation with URL and description."""
+class SearchResultWeb(BaseModel):
+    """A web search result with URL, title, and description."""
     url: str
     title: Optional[str] = None
     description: Optional[str] = None
+    category: Optional[str] = None
+
+class SearchResultNews(BaseModel):
+  """A news search result with URL, title, snippet, date, image URL, and position."""
+  title: Optional[str] = None
+  url: Optional[str] = None
+  snippet: Optional[str] = None
+  date: Optional[str] = None
+  image_url: Optional[str] = None
+  position: Optional[int] = None
+  category: Optional[str] = None
+
+class SearchResultImages(BaseModel):
+  """An image search result with URL, title, image URL, image width, image height, and position."""
+  title: Optional[str] = None
+  image_url: Optional[str] = None
+  image_width: Optional[int] = None
+  image_height: Optional[int] = None
+  url: Optional[str] = None
+  position: Optional[int] = None
+
+class SearchData(BaseModel):
+  """Search results grouped by source type."""
+  web: Optional[List[Union[SearchResultWeb, Document]]] = None
+  news: Optional[List[Union[SearchResultNews, Document]]] = None
+  images: Optional[List[Union[SearchResultImages, Document]]] = None
 
 class MapDocument(Document):
     """A document from a map operation with URL and description."""
@@ -497,6 +529,7 @@ class SearchRequest(BaseModel):
     """Request for search operations."""
     query: str
     sources: Optional[List[SourceOption]] = None
+    categories: Optional[List[CategoryOption]] = None
     limit: Optional[int] = 5
     tbs: Optional[str] = None
     location: Optional[str] = None
@@ -523,6 +556,26 @@ class SearchRequest(BaseModel):
                 raise ValueError(f"Invalid source format: {source}")
         
         return normalized_sources
+    
+    @field_validator('categories')
+    @classmethod
+    def validate_categories(cls, v):
+        """Validate and normalize categories input."""
+        if v is None:
+            return v
+        
+        normalized_categories = []
+        for category in v:
+            if isinstance(category, str):
+                normalized_categories.append(Category(type=category))
+            elif isinstance(category, dict):
+                normalized_categories.append(Category(**category))
+            elif isinstance(category, Category):
+                normalized_categories.append(category)
+            else:
+                raise ValueError(f"Invalid category format: {category}")
+        
+        return normalized_categories
 
 class LinkResult(BaseModel):
     """A generic link result with optional metadata (used by search and map)."""
@@ -535,9 +588,9 @@ SearchResult = LinkResult
 
 class SearchData(BaseModel):
     """Search results grouped by source type."""
-    web: Optional[List[Union[LinkResult, SearchDocument]]] = None
-    news: Optional[List[Union[LinkResult, SearchDocument]]] = None
-    images: Optional[List[Union[LinkResult, SearchDocument]]] = None
+    web: Optional[List[Union[SearchResultWeb, Document]]] = None
+    news: Optional[List[Union[SearchResultNews, Document]]] = None
+    images: Optional[List[Union[SearchResultImages, Document]]] = None
 
 class SearchResponse(BaseResponse[SearchData]):
     """Response from search operation."""
